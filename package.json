@@ -13,8 +13,8 @@
   "main": "./extension.js",
   "contributes": {
     "commands": [{
-      "command": "codemate.helloWorld",
-      "title": "Hello World"
+      "command": "extension.generateTestForFunction",
+      "title": "Generate Test for Function"
     }]
   },
   "scripts": {
