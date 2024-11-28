@@ -70,8 +70,10 @@ function activate(context) {
         vscode.window.onDidChangeTextEditorSelection(handleSelectionChange)
     );
 
-    // Initialize with current editor if one exists
-    handleEditorChange(vscode.window.activeTextEditor);
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor && isValidSourceFile(activeEditor.document)) {
+        handleEditorChange(activeEditor);
+    }
 }
 
 /**
@@ -111,7 +113,7 @@ function handleDocumentChange(event) {
     // Only update if significant changes occur
     const significantChange = event.contentChanges.some(change => 
         change.text.trim().length > 0 && 
-        !change.text.match(/^\s*\/\//) // Ignore comment-only changes
+        !change.text.match(/^\s*\/\//) 
     );
 
     if (significantChange) {
@@ -155,6 +157,8 @@ function handleSelectionChange(event) {
     if (!selection || !selection.isEmpty) {
         return;
     }
+    updateDecorations();
+    updateBatchButton();
 
     const position = selection.active;
     const document = state.activeEditor.document;
@@ -162,11 +166,9 @@ function handleSelectionChange(event) {
     const lineLength = line.text.length;
     const currentTime = Date.now();
 
-    // More robust click prevention
-    const CLICK_DEBOUNCE_TIME = 2000; // Increased debounce time
-    const TYPING_COOLDOWN = 2000; // Cooldown after typing
+    const CLICK_DEBOUNCE_TIME = 2000; 
+    const TYPING_COOLDOWN = 2000;
 
-    // Prevent ALL interactions during active typing or recent typing
     if (state.isEditingFunction || 
         (currentTime - (state.lastTypingTime || 0) < TYPING_COOLDOWN)) {
         return;
@@ -180,7 +182,7 @@ function handleSelectionChange(event) {
             position.character >= lineLength - 2 && 
             position.character <= lineLength + 1;
 
-        if (isBatchClick) {
+        if (isBatchClick && event.selections.length > 1) {
             state.lastClickTime = currentTime;
             handleBatchTestGeneration(state.activeEditor);
             return;
@@ -238,6 +240,8 @@ function isValidSourceFile(document) {
     return isJavaScript && !isTestFile;
 }
 
+
+
 /**
  * Detect functions in the document
  * @param {vscode.TextDocument} document 
@@ -266,6 +270,7 @@ function detectFunctions(document) {
  * @param {string} text 
  */
 function findFunctionDefinition(text) {
+
     const patterns = [
         /^(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/,
         /^(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/,
@@ -273,14 +278,20 @@ function findFunctionDefinition(text) {
         /^(?:export\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*{/
     ];
 
+    // Remove patterns that match inside comments
     for (const pattern of patterns) {
         const match = text.match(pattern);
         if (match) {
-            return { name: match[1] };
+            // Additional check to ensure it's not inside a comment
+            const commentIndex = text.indexOf('//');
+            if (commentIndex === -1 || match.index < commentIndex) {
+                return { name: match[1] };
+            }
         }
     }
     return null;
 }
+
 
 /**
  * Create decorations array for detected functions
@@ -466,7 +477,9 @@ async function handleTestGeneration(functionInfo, isCommandExecution) {
  */
 async function generateTestCode(functionCode) {
     const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
-    const prompt = `Generate a unit test for this function:\n\n${functionCode}\n put your explanation into comments, infer the javascript convention(es modules or common js) and generate a test for that convention`;
+    const prompt = `Generate a unit test for this function:\n\n${functionCode}\n put your explanation into comments, 
+    infer the javascript convention(es modules or common js) and generate a test for that convention`;
+    const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
 
     try {
         const response = await fetch(apiUrl, {
@@ -475,7 +488,7 @@ async function generateTestCode(functionCode) {
                 "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ prompt, stream: false })
+            body: JSON.stringify({ prompt, stream: false, modelId })
         });
 
         if (!response.ok) {
@@ -516,7 +529,7 @@ async function createTestFile(functionName, testCode) {
 
         // Create the test file path INSIDE the codematetest folder
         const testFilePath = vscode.Uri.joinPath(
-            testFolderPath, // Changed from workspaceFolder.uri
+            testFolderPath, 
             `${functionName}.test.js`
         );
 
@@ -564,6 +577,7 @@ async function ensureTestFolderExists(folderPath){
     }
 }
 
+
 function deactivate() {
     if (state.decorationType) {
         state.decorationType.dispose();
@@ -571,6 +585,8 @@ function deactivate() {
     if (state.batchStatusBarItem) {
         state.batchStatusBarItem.dispose();
     }
+
+    state.functionRanges.clear;
 }
 
 module.exports = {
