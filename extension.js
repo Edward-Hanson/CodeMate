@@ -1,6 +1,6 @@
 const vscode = require('vscode');
 const path = require('path');
-
+const escomplex = require('typhonjs-escomplex');
 
 /**
  * Extension state management for CodeMate
@@ -23,6 +23,7 @@ const state = {
  * @param {vscode.ExtensionContext} context 
  */
 function activate(context) {
+    state.functionRanges.clear();
     // Initialize decoration type for individual functions
     state.decorationType = vscode.window.createTextEditorDecorationType({
         after: {
@@ -36,6 +37,13 @@ function activate(context) {
         cursor: 'pointer',
         backgroundColor: { id: 'editor.background' },
         rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+    });
+
+
+    state.complexityDecorationType = vscode.window.createTextEditorDecorationType({
+        backgroundColor: 'rgba(128,128,128,0.05)', 
+        // border: '1px solid rgba(128,128,128,0.2)',
+        // borderRadius: '3px'
     });
 
     
@@ -53,7 +61,7 @@ function activate(context) {
     // Register commands
     let disposable = vscode.commands.registerTextEditorCommand(
         'extension.generateTestForFunction',
-        (textEditor, edit, args) => handleTestGeneration(args, true)
+        (args) => handleTestGeneration(args)
     );
 
     let batchDisposable = vscode.commands.registerTextEditorCommand(
@@ -61,7 +69,13 @@ function activate(context) {
         (textEditor) => handleBatchTestGeneration(textEditor)
     );
 
-    context.subscriptions.push(disposable, batchDisposable);
+    let showComplexityDisposable = vscode.commands.registerCommand(
+        'extension.showComplexityDashboard',
+        () => showComplexityDashboard() 
+    );
+
+
+    context.subscriptions.push(disposable, batchDisposable, showComplexityDisposable);
 
     // Register editor event handlers
     context.subscriptions.push(
@@ -70,9 +84,12 @@ function activate(context) {
         vscode.window.onDidChangeTextEditorSelection(handleSelectionChange)
     );
 
-    const activeEditor = vscode.window.activeTextEditor;
+      const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor && isValidSourceFile(activeEditor.document)) {
-        handleEditorChange(activeEditor);
+        // Only update decorations, do not generate tests
+        state.activeEditor = activeEditor;
+        updateDecorations();
+        updateBatchButton();
     }
 }
 
@@ -159,6 +176,11 @@ function handleSelectionChange(event) {
     }
     updateDecorations();
     updateBatchButton();
+     // Only analyze complexity if the document has more than 10 lines
+     if (state.activeEditor.document.lineCount > 10) {
+        const metrics = analyzeComplexity(state.activeEditor.document);
+        highlightComplexFunctions(metrics);
+    }
 
     const position = selection.active;
     const document = state.activeEditor.document;
@@ -168,6 +190,11 @@ function handleSelectionChange(event) {
 
     const CLICK_DEBOUNCE_TIME = 2000; 
     const TYPING_COOLDOWN = 2000;
+
+    // Additional check to prevent test generation on empty or whitespace-only lines
+    if (line.text.trim() === '') {
+        return;
+    }
 
     if (state.isEditingFunction || 
         (currentTime - (state.lastTypingTime || 0) < TYPING_COOLDOWN)) {
@@ -181,7 +208,6 @@ function handleSelectionChange(event) {
         const isBatchClick = 
             position.character >= lineLength - 2 && 
             position.character <= lineLength + 1;
-
         if (isBatchClick && event.selections.length > 1) {
             state.lastClickTime = currentTime;
             handleBatchTestGeneration(state.activeEditor);
@@ -204,7 +230,7 @@ function handleSelectionChange(event) {
                     range,
                     code: extractFunctionCode(range.start.line)
                 };
-                handleTestGeneration(functionInfo, false);
+                handleTestGeneration(functionInfo);
                 break;
             }
         }
@@ -223,10 +249,20 @@ function updateDecorations() {
         return;
     }
 
+      // Only calculate metrics if document has more than 10 lines
+      if (document.lineCount > 10) {
+        const metrics = analyzeComplexity(document);
+        highlightComplexFunctions(metrics);
+    } else {
+        // Clear complexity decorations if document is too small
+        state.activeEditor.setDecorations(state.complexityDecorationType, []);
+    }
+
     detectFunctions(document);
     const decorations = createDecorations();
     state.activeEditor.setDecorations(state.decorationType, decorations);
 }
+
 
 /**
  * Check if the file should be processed
@@ -264,7 +300,6 @@ function detectFunctions(document) {
         }
     }
 }
-
 /**
  * Find function definition in a line of code
  * @param {string} text 
@@ -430,9 +465,8 @@ async function handleBatchTestGeneration(editor) {
 /**
  * Handle test generation command
  * @param {Object} functionInfo 
- * @param {boolean} isCommandExecution 
  */
-async function handleTestGeneration(functionInfo, isCommandExecution) {
+async function handleTestGeneration(functionInfo) {
     // Ensure function info is valid
     if (!functionInfo?.code) {
         // If no function code is provided, try to get the current function
@@ -577,16 +611,220 @@ async function ensureTestFolderExists(folderPath){
     }
 }
 
+async function showComplexityDashboard(){
+
+    if (state.activeEditor.document.lineCount == 1){
+        vscode.window.showErrorMessage("Editor is Empty");
+        return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+        'complexityDashboard',
+        'Complexity & Optimization Metrics',
+        vscode.ViewColumn.One,{enableScripts: true,}
+    );
+    panel.webview.html= await generateDashboardHTML();
+}
+
+function analyzeComplexity(document) {
+    if (!document) {
+      vscode.window.showErrorMessage("No active document found.");
+      return null;
+    }
+  
+    const sourceCode = document.getText();
+  
+    if (!sourceCode || typeof sourceCode !== 'string') {
+      vscode.window.showErrorMessage("The file is empty or invalid.");
+      return null;
+    }
+  
+    try {
+      const analysis = escomplex.analyzeModule(sourceCode);
+  
+      if (!analysis || !analysis.methods) {
+        vscode.window.showErrorMessage("Failed to analyze complexity. Invalid results.");
+        console.error("Analysis output:", analysis);
+        return null;
+      }
+
+
+      const metrics =[];
+      const lenghtOfAnalysis = analysis.methods.length;
+
+      for (let i=0; i<lenghtOfAnalysis; i++){
+        const data = analysis.methods[i]
+            const metric ={
+                "name" : data.name,
+                "complexity": data.cyclomatic,
+                "maintainability": calculateMaintainability(data.halstead.effort, data.cyclomatic, data.sloc.logical),
+                "lines":  {"start": data.lineStart, "end": data.lineEnd},
+                "errors": data.errors.length
+            }
+            metrics.push(metric);
+      }
+  
+  
+      return metrics;
+    } catch (error) {
+      //vscode.window.showErrorMessage(`Complexity analysis failed: ${error.message}`);
+      console.error(error);
+      return null;
+    }
+  }
+
+  function calculateMaintainability(halsteadEffort, cyclomatic, sloc) {
+    const epsilon = 1e-5;
+    const effortLn = Math.log(halsteadEffort + epsilon);
+    const slocLn = Math.log(sloc + epsilon);
+
+    const MI = Math.max(
+        0,
+        (171 - 5.2 * effortLn - 0.23 * cyclomatic - 16.2 * slocLn) * 100 / 171
+    );
+
+    return MI.toFixed(2); 
+}
+
+
+
+
+
+async function generateDashboardHTML(){
+    const document = vscode.window.activeTextEditor?.document;
+    if (!document){
+        return '<h1>No Active File</h1><p>Please open a file to analyze complexity.</p>';
+    }
+
+    const metrics = analyzeComplexity(document);
+    const rows = metrics.map(metric => 
+        `<tr>
+            <td>${metric.name}</td>
+            <td>${metric.lines.start}-${metric.lines.end}</td>
+            <td>${metric.complexity}</td>
+            <td>${metric.maintainability}</td>
+            <td>${metric.errors}</td>
+        </tr>`
+    ).join('');
+
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Complexity Metrics</title>
+        <style>
+            body { font-family: Candara, Arial, sans-serif; padding: 1rem; color: black;}
+            h1 { text-align: center; color: white; font-weight: 700; font-size:30px;}
+            table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 20px; color: white;}
+            th { background-color: #f4f4f4; color: black; }
+        </style>
+    </head>
+    <body>
+        <h1>Complexity & Optimization Metrics</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>Function</th>
+                    <th>Lines</th>
+                    <th>Cyclomatic Complexity</th>
+                    <th>Maintainability</th>
+                    <th>Errors</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </body>
+    </html>`;
+}
+
+/**
+ * Highlights functions in the editor based on their complexity.
+ * @param {Array} metrics - List of function metrics containing name, complexity, and line ranges.
+ */
+function highlightComplexFunctions(metrics) {
+    if (!state.activeEditor) {
+        console.error("No active editor found.");
+        return;
+    }
+
+    if(state.activeEditor.document.lineCount<10){
+        return ;
+    }
+    
+    if (!metrics || metrics.length === 0 || state.activeEditor.document.lineCount < 10) {
+        state.activeEditor.setDecorations(state.complexityDecorationType, []);
+        return;
+    }
+
+    const complexityDecorations = [];
+  
+    for (const metric of metrics) {
+        if (
+            !metric ||
+            !metric.lines ||
+            typeof metric.lines.start !== "number" ||
+            typeof metric.lines.end !== "number"
+        ) {
+            console.warn("Skipping invalid metric:", metric);
+            continue;
+        }
+  
+        const startLine = metric.lines.start - 1;
+        const endLine = metric.lines.end - 1;
+  
+        try {
+            const range = new vscode.Range(
+                startLine,
+                0,
+                endLine,
+                state.activeEditor.document.lineAt(endLine).text.length
+            );
+  
+            const hoverMessage =
+                metric.complexity > 10
+                    ? `⚠️ High Complexity (${metric.complexity}) - Consider refactoring "${metric.name}".`
+                    : `✓ Optimal Complexity (${metric.complexity}) - "${metric.name}" is well-structured.`;
+  
+            const decoration = {
+                range: range,
+                hoverMessage: hoverMessage,
+                renderOptions: {
+                    after: {
+                        contentText: metric.complexity > 10 ? "⚠️ High" : "✓ Optimal",
+                        color: metric.complexity > 10 ? "red" : "green",
+                        margin: "0 0 0 1rem",
+                        fontWeight: "bold",
+                    },
+                },
+            };
+  
+            complexityDecorations.push(decoration);
+        } catch (error) {
+            console.error(
+                `Error creating range for metric: ${metric.name}`,
+                error
+            );
+        }
+    }
+  
+    // Use the new complexityDecorationType
+    state.activeEditor.setDecorations(state.complexityDecorationType, complexityDecorations);
+}
+
 
 function deactivate() {
     if (state.decorationType) {
         state.decorationType.dispose();
     }
+    if (state.complexityDecorationType) {
+        state.complexityDecorationType.dispose();
+    }
     if (state.batchStatusBarItem) {
         state.batchStatusBarItem.dispose();
     }
 
-    state.functionRanges.clear;
+    state.functionRanges.clear();
 }
 
 module.exports = {
