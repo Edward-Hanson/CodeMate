@@ -42,8 +42,6 @@ function activate(context) {
 
     state.complexityDecorationType = vscode.window.createTextEditorDecorationType({
         backgroundColor: 'rgba(128,128,128,0.05)', 
-        // border: '1px solid rgba(128,128,128,0.2)',
-        // borderRadius: '3px'
     });
 
     
@@ -185,7 +183,7 @@ function handleSelectionChange(event) {
     const position = selection.active;
     const document = state.activeEditor.document;
     const line = document.lineAt(position.line);
-    const lineLength = line.text.length;
+    const lineLength = line.text.trim().length;
     const currentTime = Date.now();
 
     const CLICK_DEBOUNCE_TIME = 2000; 
@@ -216,9 +214,7 @@ function handleSelectionChange(event) {
     }
 
     // Single function test generation click
-    const isDeliberateClick = 
-        position.character >= lineLength - 15 && 
-        position.character <= lineLength + 10 &&
+    const isDeliberateClick =( position.character == lineLength + 5 || position.character == lineLength + 6 ) &&
         currentTime - state.lastClickTime > CLICK_DEBOUNCE_TIME;
 
     if (isDeliberateClick) {
@@ -282,24 +278,47 @@ function isValidSourceFile(document) {
  * Detect functions in the document
  * @param {vscode.TextDocument} document 
  */
+/**
+ * Detect functions in the document and add placeholders
+ * @param {vscode.TextDocument} document 
+ */
 function detectFunctions(document) {
     state.functionRanges.clear();
+
+    const edits = [];
+    const placeholder = " ".repeat(50); // Example placeholder: 10 spaces
 
     for (let i = 0; i < document.lineCount; i++) {
         const line = document.lineAt(i);
         const trimmedLine = line.text.trim();
-        
+
         if (!trimmedLine || trimmedLine.startsWith('//') || trimmedLine.startsWith('/*')) {
             continue;
         }
 
         const match = findFunctionDefinition(line.text);
         if (match) {
-            const range = new vscode.Range(i, 0, i, line.text.length);
+            const range = new vscode.Range(i, 0, i, line.text.trim().length);
             state.functionRanges.set(match.name, range);
+
+            // Check if there's enough whitespace at the end of the line
+            if (!line.text.endsWith(placeholder)) {
+                const edit = vscode.TextEdit.insert(
+                    new vscode.Position(i, line.text.length),
+                    placeholder
+                );
+                edits.push(edit);
+            }
         }
     }
+
+    if (edits.length > 0) {
+        const workspaceEdit = new vscode.WorkspaceEdit();
+        workspaceEdit.set(document.uri, edits);
+        vscode.workspace.applyEdit(workspaceEdit);
+    }
 }
+
 /**
  * Find function definition in a line of code
  * @param {string} text 
@@ -335,15 +354,16 @@ function createDecorations() {
     return Array.from(state.functionRanges.entries()).map(([name, range]) => ({
         range: new vscode.Range(
             range.end.line,
-            range.end.character - 1,
+            range.end.character + 4,
             range.end.line,
-            range.end.character + 6
+            range.end.character +5
         ),
         hoverMessage: `Click to generate test for function "${name}"`,
         renderOptions: {
             after: {
                 contentText: '⚡Test',
-                margin: '0 0 0 1rem',
+                margin: '0 0rem 0 0rem',
+                padding: '0 0rem 0 0rem',
                 textDecoration: 'none; cursor: pointer !important;'
             }
         }
@@ -393,7 +413,6 @@ async function handleBatchTestGeneration(editor) {
     if (!editor || state.functionRanges.size < 2) {
         return;
     }
-
     try {
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -426,7 +445,7 @@ async function handleBatchTestGeneration(editor) {
                 if (!workspaceFolder) {
                     throw new Error('No workspace folder found');
                 }
-
+                
                 // Create the test folder path
                 const testFolderPath = vscode.Uri.joinPath(workspaceFolder.uri, 'codematetest');
                 await ensureTestFolderExists(testFolderPath);
@@ -511,7 +530,14 @@ async function handleTestGeneration(functionInfo) {
  */
 async function generateTestCode(functionCode) {
     const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
-    const prompt = `Generate a unit test for this function:\n\n${functionCode}\n put your explanation into comments, 
+    const prompt = `Assume the position of a Expert Software Developer\n
+    Conduct a comprehensive code review for the code below in terms of ;\n
+    1. Best practices\n
+    2. Performance Optimization Suggestions\n
+    3. Refactoring Recommendations \n
+    4. Adherence to Amalitech Coding standard\n\n
+    Note: Put everything in comment except the generated test code\n\n
+    Generate a unit test for this function:\n\n${functionCode}\n put your explanation into comments, 
     infer the javascript convention(es modules or common js) and generate a test for that convention`;
     const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
 
@@ -778,7 +804,7 @@ function highlightComplexFunctions(metrics) {
                 startLine,
                 0,
                 endLine,
-                state.activeEditor.document.lineAt(endLine).text.length
+                state.activeEditor.document.lineAt(endLine).text.trim().length
             );
   
             const hoverMessage =
