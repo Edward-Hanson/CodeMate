@@ -8,14 +8,16 @@ const escomplex = require('typhonjs-escomplex');
 const state = {
     activeEditor: null,
     decorationType: null,
+    refactorDecorationType: null ,
     batchDecorationType: null,
     functionRanges: new Map(),
+    complexityRanges: new Map(),
     lastProcessedVersion: undefined,
     isEditingFunction: false,
     lastClickTime: 0,
     batchStatusBarItem: null,
     lastTypingTime: 0,
-    editingTimeout: null
+    editingTimeout: null,
 };
 
 /**
@@ -24,6 +26,7 @@ const state = {
  */
 function activate(context) {
     state.functionRanges.clear();
+
     // Initialize decoration type for individual functions
     state.decorationType = vscode.window.createTextEditorDecorationType({
         after: {
@@ -55,6 +58,12 @@ function activate(context) {
     state.batchStatusBarItem.command = 'extension.generateTestsForAllFunctions';
     context.subscriptions.push(state.batchStatusBarItem);
 
+    state.refactorDecorationType = vscode.window.createTextEditorDecorationType({
+        gutterIconPath: vscode.Uri.file(path.join(__dirname + "/resources/images", 'refactor-icon.svg')),
+        gutterIconSize: 'contain',
+        cursor: 'pointer'
+    });
+
 
     // Register commands
     let disposable = vscode.commands.registerTextEditorCommand(
@@ -72,8 +81,13 @@ function activate(context) {
         () => showComplexityDashboard() 
     );
 
+    let refactorDisposable = vscode.commands.registerTextEditorCommand(
+        'extension.refactorHighComplexityFunction',
+        (textEditor, edit, functionName) => handleFunctionRefactoring(functionName)
+    );
 
-    context.subscriptions.push(disposable, batchDisposable, showComplexityDisposable);
+
+    context.subscriptions.push(disposable, batchDisposable, showComplexityDisposable,refactorDisposable);
 
     // Register editor event handlers
     context.subscriptions.push(
@@ -172,6 +186,8 @@ function handleSelectionChange(event) {
     if (!selection || !selection.isEmpty) {
         return;
     }
+
+    vscode.window.showInformationMessage("Position: ", selection.active.character.toString());
     updateDecorations();
     updateBatchButton();
      // Only analyze complexity if the document has more than 10 lines
@@ -230,6 +246,24 @@ function handleSelectionChange(event) {
                 break;
             }
         }
+    }
+
+    if (!state.activeEditor || event.textEditor !== state.activeEditor) {
+        return;
+    }
+
+    // Check if click is in the gutter for a high-complexity function
+    if (currentTime - state.lastClickTime > CLICK_DEBOUNCE_TIME) {
+        if (position.character==0){
+        for (const [functionName, range] of state.complexityRanges) {
+            if (range.contains(selection.active)) {
+                state.lastClickTime = currentTime;
+                // Trigger refactoring for this function
+                vscode.commands.executeCommand('extension.refactorHighComplexityFunction', functionName);
+                break;
+            }
+        }
+    }
     }
 }
 
@@ -780,10 +814,13 @@ function highlightComplexFunctions(metrics) {
     
     if (!metrics || metrics.length === 0 || state.activeEditor.document.lineCount < 10) {
         state.activeEditor.setDecorations(state.complexityDecorationType, []);
+        state.activeEditor.setDecorations(state.refactorDecorationType, []);
         return;
     }
 
     const complexityDecorations = [];
+    const refactorDecorations = [];
+    state.complexityRanges.clear(); 
   
     for (const metric of metrics) {
         if (
@@ -826,6 +863,24 @@ function highlightComplexFunctions(metrics) {
             };
   
             complexityDecorations.push(decoration);
+
+            // Add refactor gutter icon for high-complexity functions
+            if (metric.complexity > 10) {
+                const refactorRange = new vscode.Range(
+                    startLine, 
+                    0, 
+                    startLine, 
+                    0
+                );
+                
+                // Store the function range for later reference in refactoring
+                state.complexityRanges.set(metric.name, range);
+
+                refactorDecorations.push({
+                    range: refactorRange,
+                    hoverMessage: `Refactor high complexity function: ${metric.name}`
+                });
+            }
         } catch (error) {
             console.error(
                 `Error creating range for metric: ${metric.name}`,
@@ -834,9 +889,105 @@ function highlightComplexFunctions(metrics) {
         }
     }
   
-    // Use the new complexityDecorationType
+    // Use the complexity decoration type
     state.activeEditor.setDecorations(state.complexityDecorationType, complexityDecorations);
+    
+    // Use the refactor decoration type for gutter icons
+    state.activeEditor.setDecorations(state.refactorDecorationType, refactorDecorations);
 }
+
+
+/**
+ * Handle refactoring for a high-complexity function
+ * @param {string} functionName 
+ */
+async function handleFunctionRefactoring(functionName) {
+    try {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
+
+        // Find the function's range
+        const functionRange = state.complexityRanges.get(functionName);
+        if (!functionRange) return;
+
+        // Extract full function code
+        const functionCode = extractFunctionCode(functionRange.start.line);
+        if (!functionCode) return;
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Refactoring function...",
+            cancellable: false
+        }, async () => {
+            const refactoredCode = await requestFunctionRefactoring(functionCode);
+            
+            // Replace the existing function with refactored code
+            const edit = new vscode.WorkspaceEdit();
+            edit.replace(editor.document.uri, functionRange, refactoredCode);
+            
+            await vscode.workspace.applyEdit(edit);
+            vscode.window.showInformationMessage(`Refactored function: ${functionName}`);
+        });
+    } catch (error) {
+        vscode.window.showErrorMessage(`Refactoring failed: ${error.message}`);
+    }
+}
+
+/**
+ * Request function refactoring from API
+ * @param {string} functionCode 
+ */
+async function requestFunctionRefactoring(functionCode) {
+    const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
+    const prompt = `As an Expert Software Developer, refactor the following JavaScript function:
+
+Refactoring Guidelines:
+1. Improve code readability
+2. Reduce cyclomatic complexity
+3. Follow best practices
+4. Maintain original functionality
+5. Add comments explaining key changes
+
+Function to Refactor:
+\`\`\`javascript
+${functionCode}
+\`\`\`
+
+Please return ONLY the refactored code. Do not include any additional text or explanations.`;
+
+    const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ prompt, stream: false, modelId })
+        });
+
+        if (!response.ok) {
+            throw new Error(`API error: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return extractRefactoredCode(data.data.content);
+    } catch (error) {
+        throw new Error(`Refactoring failed: ${error.message}`);
+    }
+}
+
+
+/**
+ * Extract refactored code from API response
+ * @param {string} response 
+ */
+function extractRefactoredCode(response) {
+    const codeMatch = response.match(/```javascript\n([\s\S]*?)```/);
+    return codeMatch ? codeMatch[1].trim() : response.trim();
+}
+
 
 
 function deactivate() {
