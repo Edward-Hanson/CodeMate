@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const path = require('path');
 const escomplex = require('typhonjs-escomplex');
 
+
 /**
  * Extension state management for CodeMate
  */
@@ -42,7 +43,6 @@ function activate(context) {
         rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
     });
 
-
     state.complexityDecorationType = vscode.window.createTextEditorDecorationType({
         backgroundColor: 'rgba(128,128,128,0.05)', 
     });
@@ -82,12 +82,32 @@ function activate(context) {
     );
 
     let refactorDisposable = vscode.commands.registerTextEditorCommand(
-        'extension.refactorHighComplexityFunction',
-        (textEditor, edit, functionName) => handleFunctionRefactoring(functionName)
+        'extension.handleFunctionRefactoring',
+        async (textEditor, edit, functionName) => {
+            if (!functionName) {
+                // If no function name is provided, try to find the function at the current cursor position
+                const position = textEditor.selection.active;
+                for (const [name, range] of state.complexityRanges) {
+                    if (range.contains(position)) {
+                        functionName = name;
+                        break;
+                    }
+                }
+            }
+            if (!functionName) {
+                vscode.window.showErrorMessage("No function selected for refactoring.");
+                return;
+            }
+            await handleFunctionRefactoring(functionName);
+        }
     );
+    context.subscriptions.push(refactorDisposable);
+    context.subscriptions.push(refactorDisposable);
+    
 
 
-    context.subscriptions.push(disposable, batchDisposable, showComplexityDisposable,refactorDisposable);
+
+    context.subscriptions.push(disposable, batchDisposable, showComplexityDisposable);
 
     // Register editor event handlers
     context.subscriptions.push(
@@ -141,7 +161,6 @@ function handleDocumentChange(event) {
     
     // Only update if significant changes occur
     const significantChange = event.contentChanges.some(change => 
-        change.text.trim().length > 0 && 
         !change.text.match(/^\s*\/\//) 
     );
 
@@ -187,7 +206,6 @@ function handleSelectionChange(event) {
         return;
     }
 
-    vscode.window.showInformationMessage("Position: ", selection.active.character.toString());
     updateDecorations();
     updateBatchButton();
      // Only analyze complexity if the document has more than 10 lines
@@ -247,25 +265,8 @@ function handleSelectionChange(event) {
             }
         }
     }
-
-    if (!state.activeEditor || event.textEditor !== state.activeEditor) {
-        return;
-    }
-
-    // Check if click is in the gutter for a high-complexity function
-    if (currentTime - state.lastClickTime > CLICK_DEBOUNCE_TIME) {
-        if (position.character==0){
-        for (const [functionName, range] of state.complexityRanges) {
-            if (range.contains(selection.active)) {
-                state.lastClickTime = currentTime;
-                // Trigger refactoring for this function
-                vscode.commands.executeCommand('extension.refactorHighComplexityFunction', functionName);
-                break;
-            }
-        }
-    }
-    }
 }
+
 
 /**
  * Update function decorations in the editor
@@ -404,6 +405,7 @@ function createDecorations() {
     }));
 }
 
+
 /**
  * Extract complete function code
  * @param {number} startLine 
@@ -438,6 +440,7 @@ function extractFunctionCode(startLine) {
     }
     return null;
 }
+
 
 /**
  * Handle batch test generation for all functions
@@ -573,7 +576,7 @@ async function generateTestCode(functionCode) {
     Note: Put everything in comment except the generated test code\n\n
     Generate a unit test for this function:\n\n${functionCode}\n put your explanation into comments, 
     infer the javascript convention(es modules or common js) and generate a test for that convention`;
-    const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
+    //const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
 
     try {
         const response = await fetch(apiUrl, {
@@ -582,7 +585,7 @@ async function generateTestCode(functionCode) {
                 "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ prompt, stream: false, modelId })
+            body: JSON.stringify({ prompt, stream: false })
         });
 
         if (!response.ok) {
@@ -609,7 +612,7 @@ function extractTestCode(response) {
  * Create test file
  * @param {string} functionName 
  * @param {string} testCode 
- */
+*/
 async function createTestFile(functionName, testCode) {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
@@ -671,19 +674,7 @@ async function ensureTestFolderExists(folderPath){
     }
 }
 
-async function showComplexityDashboard(){
 
-    if (state.activeEditor.document.lineCount == 1){
-        vscode.window.showErrorMessage("Editor is Empty");
-        return;
-    }
-    const panel = vscode.window.createWebviewPanel(
-        'complexityDashboard',
-        'Complexity & Optimization Metrics',
-        vscode.ViewColumn.One,{enableScripts: true,}
-    );
-    panel.webview.html= await generateDashboardHTML();
-}
 
 function analyzeComplexity(document) {
     if (!document) {
@@ -707,7 +698,6 @@ function analyzeComplexity(document) {
         return null;
       }
 
-
       const metrics =[];
       const lenghtOfAnalysis = analysis.methods.length;
 
@@ -722,8 +712,6 @@ function analyzeComplexity(document) {
             }
             metrics.push(metric);
       }
-  
-  
       return metrics;
     } catch (error) {
       //vscode.window.showErrorMessage(`Complexity analysis failed: ${error.message}`);
@@ -731,6 +719,7 @@ function analyzeComplexity(document) {
       return null;
     }
   }
+
 
   function calculateMaintainability(halsteadEffort, cyclomatic, sloc) {
     const epsilon = 1e-5;
@@ -741,11 +730,8 @@ function analyzeComplexity(document) {
         0,
         (171 - 5.2 * effortLn - 0.23 * cyclomatic - 16.2 * slocLn) * 100 / 171
     );
-
     return MI.toFixed(2); 
 }
-
-
 
 
 
@@ -763,6 +749,14 @@ async function generateDashboardHTML(){
             <td>${metric.complexity}</td>
             <td>${metric.maintainability}</td>
             <td>${metric.errors}</td>
+            <td>
+                ${metric.complexity > 10 ? 
+                    `<button onclick="vscode.postMessage({command: 'refactor', functionName: '${metric.name}'})">
+                        Refactor
+                    </button>` : 
+                    'N/A'
+                }
+            </td>
         </tr>`
     ).join('');
 
@@ -778,7 +772,24 @@ async function generateDashboardHTML(){
             table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
             th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 20px; color: white;}
             th { background-color: #f4f4f4; color: black; }
+            button { 
+                background-color: #4CAF50; 
+                border: none; 
+                color: white; 
+                padding: 5px 10px; 
+                text-align: center; 
+                text-decoration: none; 
+                display: inline-block; 
+                font-size: 14px; 
+                margin: 4px 2px; 
+                cursor: pointer; 
+                border-radius: 4px; 
+            }
+            button:hover { background-color: #45a049; }
         </style>
+        <script>
+            const vscode = acquireVsCodeApi();
+        </script>
     </head>
     <body>
         <h1>Complexity & Optimization Metrics</h1>
@@ -790,12 +801,78 @@ async function generateDashboardHTML(){
                     <th>Cyclomatic Complexity</th>
                     <th>Maintainability</th>
                     <th>Errors</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>${rows}</tbody>
         </table>
     </body>
     </html>`;
+}
+
+// Update the showComplexityDashboard function to handle webview messages
+async function showComplexityDashboard(){
+    if (!state.activeEditor || state.activeEditor.document.lineCount <= 1){
+        vscode.window.showErrorMessage("Editor is Empty or No Active Editor");
+        return;
+    }
+
+    // Store the current document's contents and file path instead of URI
+    const documentPath = state.activeEditor.document.fileName;
+    const documentContent = state.activeEditor.document.getText();
+    
+    const panel = vscode.window.createWebviewPanel(
+        'complexityDashboard',
+        'Complexity & Optimization Metrics',
+        vscode.ViewColumn.One,
+        {
+            enableScripts: true,
+            retainContextWhenHidden: true
+        }
+    ); 
+
+    // Generate HTML content
+    panel.webview.html = await generateDashboardHTML();
+
+    // Handle messages from the webview
+    panel.webview.onDidReceiveMessage(
+        async (message) => {
+            console.log('Message received from webview:', message);
+            switch (message.command) {
+                case 'refactor':
+                    // Find the correct editor by matching file path and content
+                    const matchingEditors = vscode.window.visibleTextEditors.filter(
+                        editor => 
+                            editor.document.fileName === documentPath && 
+                            editor.document.getText() === documentContent
+                    );
+
+                    if (matchingEditors.length === 0) {
+                        // Try to open the file if it's not currently visible
+                        try {
+                            const document = await vscode.workspace.openTextDocument(documentPath);
+                            const editor = await vscode.window.showTextDocument(document);
+                            
+                            console.log(`Refactoring function: ${message.functionName}`);
+                            state.activeEditor = editor;
+                            await handleFunctionRefactoring(message.functionName);
+                        } catch (error) {
+                            vscode.window.showErrorMessage(`Cannot find or open the original document: ${error.message}`);
+                        }
+                        return;
+                    }
+
+                    // Use the first matching editor
+                    const targetEditor = matchingEditors[0];
+                    
+                    console.log(`Refactoring function: ${message.functionName}`);
+                    state.activeEditor = targetEditor;
+                    await handleFunctionRefactoring(message.functionName);
+                    break;
+            }
+        },
+        undefined,
+    );
 }
 
 /**
@@ -872,28 +949,34 @@ function highlightComplexFunctions(metrics) {
                     startLine, 
                     0
                 );
-                
-                // Store the function range for later reference in refactoring
+                 // Store the function range for later reference in refactoring
                 state.complexityRanges.set(metric.name, range);
 
                 refactorDecorations.push({
                     range: refactorRange,
-                    hoverMessage: `Refactor high complexity function: ${metric.name}`
+                    hoverMessage: `Refactor high complexity function: ${metric.name}`,
+                    renderOptions: {
+                        gutterIconPath: vscode.Uri.file(
+                            path.join(__dirname, "resources/images/refactor-icon.svg")
+                        ),
+                        gutterIconSize: "contain",
+                        cursor: "pointer", // Ensures pointer cursor on hover
+                    },
                 });
+                
             }
         } catch (error) {
-            console.error(
-                `Error creating range for metric: ${metric.name}`,
-                error
-            );
+             console.error(
+                 `Error creating range for metric: ${metric.name}`,
+                 error
+             );
+         }
         }
-    }
-  
-    // Use the complexity decoration type
-    state.activeEditor.setDecorations(state.complexityDecorationType, complexityDecorations);
-    
-    // Use the refactor decoration type for gutter icons
-    state.activeEditor.setDecorations(state.refactorDecorationType, refactorDecorations);
+
+     // Use the complexity decoration type
+     state.activeEditor.setDecorations(state.complexityDecorationType, complexityDecorations);
+     // Use the refactor decoration type for gutter icons
+     state.activeEditor.setDecorations(state.refactorDecorationType, refactorDecorations);
 }
 
 
@@ -904,34 +987,64 @@ function highlightComplexFunctions(metrics) {
 async function handleFunctionRefactoring(functionName) {
     try {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) return;
+        if (!editor) {
+            vscode.window.showErrorMessage("No active editor found.");
+            return;
+        }
 
         // Find the function's range
         const functionRange = state.complexityRanges.get(functionName);
-        if (!functionRange) return;
+        if (!functionRange) {
+            vscode.window.showInformationMessage(`Function "${functionName}" not found.`);
+            return;
+        }
 
-        // Extract full function code
-        const functionCode = extractFunctionCode(functionRange.start.line);
-        if (!functionCode) return;
-
+        // Show a loading notification
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "Refactoring function...",
-            cancellable: false
-        }, async () => {
-            const refactoredCode = await requestFunctionRefactoring(functionCode);
+            title: `Analyzing and preparing to refactor function: ${functionName}`,
+            cancellable: true
+        }, async (progress, token) => {
+            // Check for cancellation
+            if (token.isCancellationRequested) {
+                return;
+            }
+
+            progress.report({ increment: 10, message: "Extracting function code..." });
             
-            // Replace the existing function with refactored code
+            // Extract full function code
+            const functionCode = extractFunctionCode(functionRange.start.line);
+            if (!functionCode) {
+                vscode.window.showErrorMessage(`Could not extract code for function: ${functionName}`);
+                return;
+            }
+
+            progress.report({ increment: 30, message: "Requesting refactoring suggestions..." });
+            
+            // Request refactoring
+            const refactoredResult = await requestFunctionRefactoring(functionCode);
+
+            progress.report({ increment: 40, message: "Preparing refactoring..." });
+
+            // Create a workspace edit to replace the function
             const edit = new vscode.WorkspaceEdit();
-            edit.replace(editor.document.uri, functionRange, refactoredCode);
+            edit.replace(editor.document.uri, functionRange, refactoredResult);
             
+            // Apply the edit
             await vscode.workspace.applyEdit(edit);
-            vscode.window.showInformationMessage(`Refactored function: ${functionName}`);
+
+            progress.report({ increment: 20, message: "Refactoring complete!" });
+
+            // Show success message
+            vscode.window.showInformationMessage(`Successfully refactored function: ${functionName}`);
         });
+
     } catch (error) {
+        console.error('Refactoring error:', error);
         vscode.window.showErrorMessage(`Refactoring failed: ${error.message}`);
     }
 }
+
 
 /**
  * Request function refactoring from API
@@ -955,7 +1068,7 @@ ${functionCode}
 
 Please return ONLY the refactored code. Do not include any additional text or explanations.`;
 
-    const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
+    //const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
 
     try {
         const response = await fetch(apiUrl, {
@@ -964,7 +1077,7 @@ Please return ONLY the refactored code. Do not include any additional text or ex
                 "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ prompt, stream: false, modelId })
+            body: JSON.stringify({ prompt, stream: false})
         });
 
         if (!response.ok) {

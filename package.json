@@ -1,4 +1,7 @@
 {
+  "enabledApiProposals": [
+    "contribEditorContentMenu"
+  ],
   "name": "codemate",
   "displayName": "CodeMate",
   "description": "",
@@ -16,6 +19,13 @@
   "main": "./extension.js",
   "contributes": {
     "menus": {
+      "editor/title": [
+        {
+          "command": "extension.handleFunctionRefactoring",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
       "commandPalette": [
         {
           "command": "extension.generateTestForFunction",
@@ -31,6 +41,10 @@
       {
         "command": "extension.generateTestForFunction",
         "title": "Generate Test for Function"
+      },
+      {
+        "command": "extension.handleFunctionRefactoring",
+        "title": "Refactor High Complexity Function"
       },
       {
         "command": "extension.showComplexityDashboard",
@@ -54,6 +68,7 @@
   "dependencies": {
     "escomplex": "^2.0.0-alpha",
     "esprima": "^4.0.1",
+    "package.json": "^2.0.1",
     "typhonjs-escomplex": "^0.1.0"
   }
 }
