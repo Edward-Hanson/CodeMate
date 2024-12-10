@@ -1025,7 +1025,7 @@ async function generateDashboardHTML(){
             <td>${metric.maintainability}</td>
             <td>${metric.errors}</td>
             <td>
-                ${metric.complexity > 10 ? 
+                ${metric.complexity > 9 ? 
                     `<button onclick="vscode.postMessage({command: 'refactor', functionName: '${metric.name}'})">
                         Refactor
                     </button>` : 
@@ -1197,7 +1197,7 @@ function highlightComplexFunctions(metrics) {
             );
   
             const hoverMessage =
-                metric.complexity > 10
+                metric.complexity > 9
                     ? `⚠️ High Complexity (${metric.complexity}) - Consider refactoring "${metric.name}".`
                     : `✓ Optimal Complexity (${metric.complexity}) - "${metric.name}" is well-structured.`;
   
@@ -1206,8 +1206,8 @@ function highlightComplexFunctions(metrics) {
                 hoverMessage: hoverMessage,
                 renderOptions: {
                     after: {
-                        contentText: metric.complexity > 10 ? "⚠️ High" : "✓ Optimal",
-                        color: metric.complexity > 10 ? "red" : "green",
+                        contentText: metric.complexity > 9 ? "⚠️ High" : "✓ Optimal",
+                        color: metric.complexity > 9 ? "red" : "green",
                         margin: "0 0 0 1rem",
                         fontWeight: "bold",
                     },
@@ -1217,7 +1217,7 @@ function highlightComplexFunctions(metrics) {
             complexityDecorations.push(decoration);
 
             // Add refactor gutter icon for high-complexity functions
-            if (metric.complexity > 10) {
+            if (metric.complexity > 9) {
                 const refactorRange = new vscode.Range(
                     startLine, 
                     0, 
