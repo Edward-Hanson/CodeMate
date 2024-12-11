@@ -1,13 +1,21 @@
 const vscode = require('vscode');
 const path = require('path');
+const dotenv = require('dotenv');
+
+dotenv.config({path: path.resolve(__dirname,'../../.env')});
+const apiUrl = process.env.API_URL;
+const apiKey = process.env.X_API_KEY;
 
 
 /**
  * Handle batch test generation for all functions
- * @param {vscode.TextEditor} editor 
  */
-async function handleBatchTestGeneration(state, editor) {
-    if (!editor || state.functionRanges.size < 2) {
+async function handleBatchTestGeneration (curr_state) {
+
+    const editor = curr_state.activeEditor;
+
+    if (!editor || curr_state.functionRanges.size < 2) {
+        console.log("Less Functions: ",curr_state.functionRanges.size);
         return;
     }
     try {
@@ -16,15 +24,12 @@ async function handleBatchTestGeneration(state, editor) {
             title: "Generating tests for file...",
             cancellable: false
         }, async (progress) => {
-            // Get the entire file content
             const document = editor.document;
             const fileContent = document.getText();
             
-            // Get the file name without extension
             const fileName = path.basename(document.fileName, path.extname(document.fileName));
 
             try {
-                // Generate test for the entire file
                 progress.report({
                     message: `Generating tests for ${fileName}`,
                     increment: 50
@@ -37,7 +42,6 @@ async function handleBatchTestGeneration(state, editor) {
                     increment: 50
                 });
 
-                // Create a single test file
                 const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
                 if (!workspaceFolder) {
                     throw new Error('No workspace folder found');
@@ -80,7 +84,6 @@ async function handleBatchTestGeneration(state, editor) {
 
 
 async function generateBatchTestCode(functionCode) {
-    const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
     const prompt = `Assume the position of an Expert Software Developer. 
     For the following function, provide:
     1. A comprehensive unit test
@@ -89,8 +92,9 @@ async function generateBatchTestCode(functionCode) {
        b) Performance optimization suggestions
        c) Refactoring recommendations
        d) Adherence to Amalitech Coding standards
-
-    Put all comment in a comments (//), make sure that just the runnable code in not in a comment
+    
+    Write a comprehensive test for the functions below
+    Put all comment in a comments (//), make sure that the generated tests (runnable code) is not in a comment
 
     Function to analyze:
     \\\\javascript
@@ -98,10 +102,21 @@ async function generateBatchTestCode(functionCode) {
     \\\\\`\``;
 
     try {
+        const data = await apiCall(prompt);
+        return extractTestCode(data);
+    } catch (error) {
+        throw new Error(`Test generation failed: ${error.message}`);
+    }
+}
+
+
+
+async function apiCall(prompt){
+    try{
         const response = await fetch(apiUrl, {
             method: "POST",
             headers: {
-                "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
+                "X-API-KEY": apiKey,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({ prompt, stream: false })
@@ -112,11 +127,13 @@ async function generateBatchTestCode(functionCode) {
         }
 
         const data = await response.json();
-        return extractTestCode(data.data.content);
+        return data.data.content;
     } catch (error) {
         throw new Error(`Test generation failed: ${error.message}`);
     }
 }
+
+
 
 /**
  * Extract code from API response
@@ -137,9 +154,7 @@ function extractTestCode(response) {
  * @param {Object} functionInfo 
  */
 async function handleTestGeneration(state, functionInfo) {
-    console.log("Code: " , functionInfo.code);
     if (!functionInfo?.code) {
-        // If no function code is provided, try to get the current function
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
 
@@ -261,7 +276,6 @@ async function createTestFile(functionName, content) {
  * @param {string} functionCode 
  */
 async function generateTestCode(functionCode) {
-    const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
     const prompt = `Assume the position of an Expert Software Developer. 
     For the following function, provide:
     1. A comprehensive unit test
@@ -279,23 +293,10 @@ async function generateTestCode(functionCode) {
     \\\\javascript
     ${functionCode}
     \\\\\`\``;
-
+    
     try {
-        const response = await fetch(apiUrl, {
-            method: "POST",
-            headers: {
-                "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ prompt, stream: false })
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return extractTestAndReviewContent(data.data.content);
+        const response = await apiCall(prompt);
+        return extractTestAndReviewContent(response);
     } catch (error) {
         throw new Error(`Test generation failed: ${error.message}`);
     }
@@ -313,20 +314,18 @@ function extractTestAndReviewContent(response) {
 }
 
 function formatReviewComments(rawComments) {
-    // Clean and format the review comments
+    // format review comments
     const cleanedComments = rawComments
         .split('\n')
         .map(line => line.replace(/^\/\/\s*/, '').trim())
         .filter(line => line.length > 0);
 
-    // Create a formatted review string
     return `Code Review:
 ${cleanedComments.map(comment => `- ${comment}`).join('\n')}`;
 }
 
 
 async function generateTestGenerationHTML(functionName, testCode, reviewComments) {
-    // You can use the HTML from the artifact, replacing placeholders dynamically
     const htmlTemplate = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -556,4 +555,4 @@ async function ensureTestFolderExists(folderPath){
     }
 }
 
-module.exports = { handleBatchTestGeneration, handleTestGeneration };
+module.exports = { handleBatchTestGeneration, handleTestGeneration, apiCall };

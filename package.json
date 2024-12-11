@@ -66,6 +66,7 @@
     "eslint": "^9.13.0"
   },
   "dependencies": {
+    "dotenv": "^16.4.7",
     "escomplex": "^2.0.0-alpha",
     "esprima": "^4.0.1",
     "package.json": "^2.0.1",

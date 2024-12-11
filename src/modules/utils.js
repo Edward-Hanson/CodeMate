@@ -1,8 +1,16 @@
 const vscode = require('vscode');
 
 
+/**
+ * Check if the file should be processed
+ * @param {vscode.TextDocument} document 
+ */
 function isValidSourceFile(document) {
-    return (document.languageId === 'javascript' || document.languageId === 'typescript') && !document.fileName.includes('.test.');
+    const isJavaScript = document.languageId === 'javascript' || 
+                        document.languageId === 'typescript';
+    const isTestFile = document.fileName.includes('.test.') || 
+                      document.fileName.includes('.spec.');
+    return isJavaScript && !isTestFile;
 }
 
 /**
@@ -13,7 +21,7 @@ function detectFunctions(state, document) {
     state.functionRanges.clear();
 
     const edits = [];
-    const placeholder = " ".repeat(50); // Example placeholder: 10 spaces
+    const placeholder = " ".repeat(50); 
 
     for (let i = 0; i < document.lineCount; i++) {
         const line = document.lineAt(i);
@@ -60,7 +68,6 @@ function findFunctionDefinition(text) {
         /^(?:export\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*{/
     ];
 
-    // Remove patterns that match inside comments
     for (const pattern of patterns) {
         const match = text.match(pattern);
         if (match) {

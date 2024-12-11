@@ -2,25 +2,55 @@ const vscode = require('vscode');
 const escomplex = require('typhonjs-escomplex');
 const path = require('path');
 
+const { handleFunctionRefactoring } = require('./refactoring.js');
+const { generateDashboardHTML } = require('./ui.js');
+const { isValidSourceFile } = require('./utils.js');
 
-function activateComplexityAnalysis(state) {
-    const editor = state.activeEditor;
-    if (!editor || editor.document.lineCount <= 1) return;
 
-    const metrics = analyzeComplexity(editor.document);
-    highlightComplexFunctions(state, metrics);
-}
 
 function analyzeComplexity(document) {
+    if (!document) {
+      vscode.window.showErrorMessage("No active document found.");
+      return null;
+    }
+  
     const sourceCode = document.getText();
-    const analysis = escomplex.analyzeModule(sourceCode);
-    return analysis.methods.map((method) => ({
-        name: method.name,
-        complexity: method.cyclomatic,
-        maintainability: calculateMaintainability(method.halstead.effort, method.cyclomatic, method.sloc.logical),
-        lines: { start: method.lineStart, end: method.lineEnd },
-    }));
+  
+    if (!sourceCode || typeof sourceCode !== 'string') {
+      vscode.window.showErrorMessage("The file is empty or invalid.");
+      return null;
+    }
+  
+    try {
+      const analysis = escomplex.analyzeModule(sourceCode);
+  
+      if (!analysis || !analysis.methods) {
+        vscode.window.showErrorMessage("Failed to analyze complexity. Invalid results.");
+        console.error("Analysis output:", analysis);
+        return null;
+      }
+
+      const metrics =[];
+      const lenghtOfAnalysis = analysis.methods.length;
+
+      for (let i=0; i<lenghtOfAnalysis; i++){
+        const data = analysis.methods[i]
+            const metric ={
+                "name" : data.name,
+                "complexity": data.cyclomatic,
+                "maintainability": calculateMaintainability(data.halstead.effort, data.cyclomatic, data.sloc.logical),
+                "lines":  {"start": data.lineStart, "end": data.lineEnd},
+                "errors": data.errors.length
+            }
+            metrics.push(metric);
+      }
+      return metrics;
+    } catch (error) {
+      console.error(error);
+      return null;
+    }
 }
+
 
 /**
  * Highlights functions in the editor based on their complexity.
@@ -34,6 +64,10 @@ function highlightComplexFunctions(state,metrics) {
 
     if(state.activeEditor.document.lineCount<10){
         return ;
+    }
+
+    if (!isValidSourceFile(vscode.window.activeTextEditor.document)){
+        return;
     }
     
     if (!metrics || metrics.length === 0 || state.activeEditor.document.lineCount < 10) {
@@ -99,18 +133,19 @@ function highlightComplexFunctions(state,metrics) {
                  // Store the function range for later reference in refactoring
                 state.complexityRanges.set(metric.name, range);
 
+                const repoRoot = path.join(__dirname, '../../');
+
                 refactorDecorations.push({
                     range: refactorRange,
                     hoverMessage: `Refactor high complexity function: ${metric.name}`,
                     renderOptions: {
                         gutterIconPath: vscode.Uri.file(
-                            path.join(__dirname, "resources/images/refactor-icon.svg")
+                            path.join(repoRoot, "resources/images/refactor-icon.svg")
                         ),
                         gutterIconSize: "contain",
-                        cursor: "pointer", // Ensures pointer cursor on hover
+                        cursor: "pointer", 
                     },
                 });
-                
             }
         } catch (error) {
              console.error(
@@ -120,16 +155,89 @@ function highlightComplexFunctions(state,metrics) {
          }
         }
 
-     // Use the complexity decoration type
      state.activeEditor.setDecorations(state.complexityDecorationType, complexityDecorations);
-     // Use the refactor decoration type for gutter icons
      state.activeEditor.setDecorations(state.refactorDecorationType, refactorDecorations);
 }
 
-function calculateMaintainability(effort, cyclomatic, sloc) {
-    const lnEffort = Math.log(effort + 1);
-    const lnSloc = Math.log(sloc + 1);
-    return Math.max(0, (171 - 5.2 * lnEffort - 0.23 * cyclomatic - 16.2 * lnSloc) * 100 / 171).toFixed(2);
+function calculateMaintainability(halsteadEffort, cyclomatic, sloc) {
+    const epsilon = 1e-5;
+    const effortLn = Math.log(halsteadEffort + epsilon);
+    const slocLn = Math.log(sloc + epsilon);
+
+    const MI = Math.max(
+        0,
+        (171 - 5.2 * effortLn - 0.23 * cyclomatic - 16.2 * slocLn) * 100 / 171
+    );
+    return MI.toFixed(2); 
 }
 
-module.exports = { analyzeComplexity, activateComplexityAnalysis, highlightComplexFunctions };
+
+
+
+
+// Update  showComplexityDashboard function to handle webview messages
+async function showComplexityDashboard(state){
+    if (!state.activeEditor || state.activeEditor.document.lineCount <= 1){
+        vscode.window.showErrorMessage("Editor is Empty or No Active Editor");
+        return;
+    }
+
+    const documentPath = state.activeEditor.document.fileName;
+    const documentContent = state.activeEditor.document.getText();
+    
+    const panel = vscode.window.createWebviewPanel(
+        'complexityDashboard',
+        'Complexity & Optimization Metrics',
+        vscode.ViewColumn.One,
+        {
+            enableScripts: true,
+            retainContextWhenHidden: true
+        }
+    ); 
+
+
+    const metrics = analyzeComplexity(state.activeEditor.document);
+
+    // Generate HTML content
+    panel.webview.html = await generateDashboardHTML(metrics);
+
+    // Handle messages from the webview
+    panel.webview.onDidReceiveMessage(
+        async (message) => {
+            console.log('Message received from webview:', message);
+            switch (message.command) {
+                case 'refactor':
+                    const matchingEditors = vscode.window.visibleTextEditors.filter(
+                        editor => 
+                            editor.document.fileName === documentPath && 
+                            editor.document.getText() === documentContent
+                    );
+
+                    if (matchingEditors.length === 0) {
+                        // Try to open the file if it's not currently visible
+                        try {
+                            const document = await vscode.workspace.openTextDocument(documentPath);
+                            const editor = await vscode.window.showTextDocument(document);
+                            
+                            console.log(`Refactoring function: ${message.functionName}`);
+                            state.activeEditor = editor;
+                            await handleFunctionRefactoring(state,message.functionName);
+                        } catch (error) {
+                            vscode.window.showErrorMessage(`Cannot find or open the original document: ${error.message}`);
+                        }
+                        return;
+                    }
+
+                    const targetEditor = matchingEditors[0];
+                    
+                    console.log(`Refactoring function: ${message.functionName}`);
+                    state.activeEditor = targetEditor;
+                    await handleFunctionRefactoring(state,message.functionName);
+                    break;
+            }
+        },
+        undefined,
+    );
+}
+
+module.exports = { analyzeComplexity, showComplexityDashboard, highlightComplexFunctions};

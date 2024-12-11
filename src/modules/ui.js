@@ -1,16 +1,14 @@
 const vscode = require('vscode');
-const escomplex = require('typhonjs-escomplex');
 
 
 
 
-async function generateDashboardHTML(){
+async function generateDashboardHTML(metrics){
     const document = vscode.window.activeTextEditor?.document;
     if (!document){
         return '<h1>No Active File</h1><p>Please open a file to analyze complexity.</p>';
     }
 
-    const metrics = analyzeComplexity(document);
     const rows = metrics.map(metric => 
         `<tr>
             <td>${metric.name}</td>
@@ -79,61 +77,5 @@ async function generateDashboardHTML(){
     </html>`;
 }
 
-
-function analyzeComplexity(document) {
-    if (!document) {
-      vscode.window.showErrorMessage("No active document found.");
-      return null;
-    }
-  
-    const sourceCode = document.getText();
-  
-    if (!sourceCode || typeof sourceCode !== 'string') {
-      vscode.window.showErrorMessage("The file is empty or invalid.");
-      return null;
-    }
-  
-    try {
-      const analysis = escomplex.analyzeModule(sourceCode);
-  
-      if (!analysis || !analysis.methods) {
-        vscode.window.showErrorMessage("Failed to analyze complexity. Invalid results.");
-        console.error("Analysis output:", analysis);
-        return null;
-      }
-
-      const metrics =[];
-      const lenghtOfAnalysis = analysis.methods.length;
-
-      for (let i=0; i<lenghtOfAnalysis; i++){
-        const data = analysis.methods[i]
-            const metric ={
-                "name" : data.name,
-                "complexity": data.cyclomatic,
-                "maintainability": calculateMaintainability(data.halstead.effort, data.cyclomatic, data.sloc.logical),
-                "lines":  {"start": data.lineStart, "end": data.lineEnd},
-                "errors": data.errors.length
-            }
-            metrics.push(metric);
-      }
-      return metrics;
-    } catch (error) {
-      console.error(error);
-      return null;
-    }
-  }
-
-
-  function calculateMaintainability(halsteadEffort, cyclomatic, sloc) {
-    const epsilon = 1e-5;
-    const effortLn = Math.log(halsteadEffort + epsilon);
-    const slocLn = Math.log(sloc + epsilon);
-
-    const MI = Math.max(
-        0,
-        (171 - 5.2 * effortLn - 0.23 * cyclomatic - 16.2 * slocLn) * 100 / 171
-    );
-    return MI.toFixed(2); 
-}
 
 module.exports = { generateDashboardHTML };

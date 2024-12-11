@@ -1,4 +1,6 @@
 const vscode = require('vscode');
+const { apiCall } = require('./testGeneration.js')
+
 
 
 
@@ -14,27 +16,26 @@ async function handleFunctionRefactoring(state,functionName) {
             return;
         }
 
-        // Find the function's range
+        // Find function's range
         const functionRange = state.complexityRanges.get(functionName);
         if (!functionRange) {
             vscode.window.showInformationMessage(`Function "${functionName}" not found.`);
             return;
         }
 
-        // Show a loading notification
+        // Show loading notification
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: `Analyzing and preparing to refactor function: ${functionName}`,
             cancellable: true
         }, async (progress, token) => {
-            // Check for cancellation
+
             if (token.isCancellationRequested) {
                 return;
             }
 
             progress.report({ increment: 10, message: "Extracting function code..." });
             
-            // Extract full function code
             const functionCode = extractFunctionCode(state, functionRange.start.line);
             if (!functionCode) {
                 vscode.window.showErrorMessage(`Could not extract code for function: ${functionName}`);
@@ -43,21 +44,17 @@ async function handleFunctionRefactoring(state,functionName) {
 
             progress.report({ increment: 30, message: "Requesting refactoring suggestions..." });
             
-            // Request refactoring
             const refactoredResult = await requestFunctionRefactoring(functionCode);
 
             progress.report({ increment: 40, message: "Preparing refactoring..." });
 
-            // Create a workspace edit to replace the function
             const edit = new vscode.WorkspaceEdit();
             edit.replace(editor.document.uri, functionRange, refactoredResult);
             
-            // Apply the edit
             await vscode.workspace.applyEdit(edit);
 
             progress.report({ increment: 20, message: "Refactoring complete!" });
 
-            // Show success message
             vscode.window.showInformationMessage(`Successfully refactored function: ${functionName}`);
         });
 
@@ -118,7 +115,6 @@ function extractRefactoredCode(response) {
  * @param {string} functionCode 
  */
 async function requestFunctionRefactoring(functionCode) {
-    const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
     const prompt = `As an Expert Software Developer, refactor the following JavaScript function:
 
 Refactoring Guidelines:
@@ -135,28 +131,12 @@ ${functionCode}
 
 Please return ONLY the refactored code. Do not include any additional text or explanations.`;
 
-    //const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
-
     try {
-        const response = await fetch(apiUrl, {
-            method: "POST",
-            headers: {
-                "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ prompt, stream: false})
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return extractRefactoredCode(data.data.content);
+        const data = await apiCall(prompt);
+        return extractRefactoredCode(data);
     } catch (error) {
         throw new Error(`Refactoring failed: ${error.message}`);
     }
 }
-
 
 module.exports = { handleFunctionRefactoring, extractFunctionCode };
