@@ -118,7 +118,6 @@ function activate(context) {
 
       const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor && isValidSourceFile(activeEditor.document)) {
-        // Only update decorations, do not generate tests
         state.activeEditor = activeEditor;
         updateDecorations();
         updateBatchButton();
@@ -148,18 +147,15 @@ function handleDocumentChange(event) {
     const activeDocument = state.activeEditor?.document;
     if (!activeDocument || event.document !== activeDocument) return;
 
-    // More sophisticated debounce mechanism
     state.isEditingFunction = true;
     
-    // Longer and more controlled delay
     clearTimeout(state.editingTimeout);
     state.editingTimeout = setTimeout(() => {
         state.isEditingFunction = false;
-    }, 2000); // Increased to 2 seconds
+    }, 2000); 
 
     state.lastProcessedVersion = event.document.version;
     
-    // Only update if significant changes occur
     const significantChange = event.contentChanges.some(change => 
         !change.text.match(/^\s*\/\//) 
     );
@@ -208,7 +204,6 @@ function handleSelectionChange(event) {
 
     updateDecorations();
     updateBatchButton();
-     // Only analyze complexity if the document has more than 10 lines
      if (state.activeEditor.document.lineCount > 10) {
         const metrics = analyzeComplexity(state.activeEditor.document);
         highlightComplexFunctions(metrics);
@@ -223,7 +218,6 @@ function handleSelectionChange(event) {
     const CLICK_DEBOUNCE_TIME = 2000; 
     const TYPING_COOLDOWN = 2000;
 
-    // Additional check to prevent test generation on empty or whitespace-only lines
     if (line.text.trim() === '') {
         return;
     }
@@ -280,12 +274,10 @@ function updateDecorations() {
         return;
     }
 
-      // Only calculate metrics if document has more than 10 lines
       if (document.lineCount > 10) {
         const metrics = analyzeComplexity(document);
         highlightComplexFunctions(metrics);
     } else {
-        // Clear complexity decorations if document is too small
         state.activeEditor.setDecorations(state.complexityDecorationType, []);
     }
 
@@ -312,16 +304,12 @@ function isValidSourceFile(document) {
 /**
  * Detect functions in the document
  * @param {vscode.TextDocument} document 
- */
-/**
- * Detect functions in the document and add placeholders
- * @param {vscode.TextDocument} document 
- */
+*/
 function detectFunctions(document) {
     state.functionRanges.clear();
 
     const edits = [];
-    const placeholder = " ".repeat(50); // Example placeholder: 10 spaces
+    const placeholder = " ".repeat(50); 
 
     for (let i = 0; i < document.lineCount; i++) {
         const line = document.lineAt(i);
@@ -336,7 +324,6 @@ function detectFunctions(document) {
             const range = new vscode.Range(i, 0, i, line.text.trim().length);
             state.functionRanges.set(match.name, range);
 
-            // Check if there's enough whitespace at the end of the line
             if (!line.text.endsWith(placeholder)) {
                 const edit = vscode.TextEdit.insert(
                     new vscode.Position(i, line.text.length),
@@ -367,11 +354,9 @@ function findFunctionDefinition(text) {
         /^(?:export\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*{/
     ];
 
-    // Remove patterns that match inside comments
     for (const pattern of patterns) {
         const match = text.match(pattern);
         if (match) {
-            // Additional check to ensure it's not inside a comment
             const commentIndex = text.indexOf('//');
             if (commentIndex === -1 || match.index < commentIndex) {
                 return { name: match[1] };
@@ -456,15 +441,12 @@ async function handleBatchTestGeneration(editor) {
             title: "Generating tests for file...",
             cancellable: false
         }, async (progress) => {
-            // Get the entire file content
             const document = editor.document;
             const fileContent = document.getText();
             
-            // Get the file name without extension
             const fileName = path.basename(document.fileName, path.extname(document.fileName));
 
             try {
-                // Generate test for the entire file
                 progress.report({
                     message: `Generating tests for ${fileName}`,
                     increment: 50
@@ -477,17 +459,14 @@ async function handleBatchTestGeneration(editor) {
                     increment: 50
                 });
 
-                // Create a single test file
                 const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
                 if (!workspaceFolder) {
                     throw new Error('No workspace folder found');
                 }
                 
-                // Create the test folder path
                 const testFolderPath = vscode.Uri.joinPath(workspaceFolder.uri, 'codematetest');
                 await ensureTestFolderExists(testFolderPath);
 
-                // Create the test file path using the original file name
                 const testFilePath = vscode.Uri.joinPath(
                     testFolderPath,
                     `${fileName}.test.js`
@@ -524,7 +503,6 @@ async function handleBatchTestGeneration(editor) {
  */
 async function handleTestGeneration(functionInfo) {
     if (!functionInfo?.code) {
-        // If no function code is provided, try to get the current function
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
 
@@ -565,30 +543,14 @@ async function handleTestGeneration(functionInfo) {
  * @param {string} functionCode 
  */
 async function generateTestCode(functionCode) {
-    const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
-    const prompt = `Assume the position of an Expert Software Developer. 
-    For the following function, provide:
-    1. A comprehensive unit test
-    2. A detailed code review with:
-       a) Best practices assessment
-       b) Performance optimization suggestions
-       c) Refactoring recommendations
-       d) Adherence to Amalitech Coding standards
-
-    Clearly separate the test code and review comments.
-    Provide test code in a code block and review comments in a comment block.
-    In the comment section, start with a comment //comment and end with a comment //comment.
-
-    Function to analyze:
-    \\\\javascript
-    ${functionCode}
-    \\\\\`\``;
+    const apiUrl = "some Url";
+    const prompt = `Some prompt`;
 
     try {
         const response = await fetch(apiUrl, {
             method: "POST",
             headers: {
-                "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
+                "X-API-KEY": "Some key",
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({ prompt, stream: false })
@@ -607,28 +569,14 @@ async function generateTestCode(functionCode) {
 
 
 async function generateBatchTestCode(functionCode) {
-    const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
-    const prompt = `Assume the position of an Expert Software Developer. 
-    For the following function, provide:
-    1. A comprehensive unit test
-    2. A detailed code review with:
-       a) Best practices assessment
-       b) Performance optimization suggestions
-       c) Refactoring recommendations
-       d) Adherence to Amalitech Coding standards
-
-    Put all comment in a comments (//), make sure that just the runnable code in not in a comment
-
-    Function to analyze:
-    \\\\javascript
-    ${functionCode}
-    \\\\\`\``;
+    const apiUrl = "Some Url";
+    const prompt = `Some prompt`;
 
     try {
         const response = await fetch(apiUrl, {
             method: "POST",
             headers: {
-                "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
+                "X-API-KEY": "Some api Key",
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({ prompt, stream: false })
@@ -656,13 +604,11 @@ function extractTestAndReviewContent(response) {
 }
 
 function formatReviewComments(rawComments) {
-    // Clean and format the review comments
     const cleanedComments = rawComments
         .split('\n')
         .map(line => line.replace(/^\/\/\s*/, '').trim())
         .filter(line => line.length > 0);
 
-    // Create a formatted review string
     return `Code Review:
 ${cleanedComments.map(comment => `- ${comment}`).join('\n')}`;
 }
@@ -719,7 +665,6 @@ async function createTestFile(functionName, content) {
 }
 
 async function generateTestGenerationHTML(functionName, testCode, reviewComments) {
-    // You can use the HTML from the artifact, replacing placeholders dynamically
     const htmlTemplate = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -920,7 +865,7 @@ ${reviewComments}
         }
     </script>
 </body>
-</html>`; // Use the HTML from the artifact above
+</html>`; 
     
     return htmlTemplate
         .replace('${functionName}', functionName)
@@ -989,7 +934,6 @@ function analyzeComplexity(document) {
       }
       return metrics;
     } catch (error) {
-      //vscode.window.showErrorMessage(`Complexity analysis failed: ${error.message}`);
       console.error(error);
       return null;
     }
@@ -1085,14 +1029,12 @@ async function generateDashboardHTML(){
     </html>`;
 }
 
-// Update the showComplexityDashboard function to handle webview messages
 async function showComplexityDashboard(){
     if (!state.activeEditor || state.activeEditor.document.lineCount <= 1){
         vscode.window.showErrorMessage("Editor is Empty or No Active Editor");
         return;
     }
 
-    // Store the current document's contents and file path instead of URI
     const documentPath = state.activeEditor.document.fileName;
     const documentContent = state.activeEditor.document.getText();
     
@@ -1106,16 +1048,13 @@ async function showComplexityDashboard(){
         }
     ); 
 
-    // Generate HTML content
     panel.webview.html = await generateDashboardHTML();
 
-    // Handle messages from the webview
     panel.webview.onDidReceiveMessage(
         async (message) => {
             console.log('Message received from webview:', message);
             switch (message.command) {
                 case 'refactor':
-                    // Find the correct editor by matching file path and content
                     const matchingEditors = vscode.window.visibleTextEditors.filter(
                         editor => 
                             editor.document.fileName === documentPath && 
@@ -1123,7 +1062,6 @@ async function showComplexityDashboard(){
                     );
 
                     if (matchingEditors.length === 0) {
-                        // Try to open the file if it's not currently visible
                         try {
                             const document = await vscode.workspace.openTextDocument(documentPath);
                             const editor = await vscode.window.showTextDocument(document);
@@ -1137,7 +1075,6 @@ async function showComplexityDashboard(){
                         return;
                     }
 
-                    // Use the first matching editor
                     const targetEditor = matchingEditors[0];
                     
                     console.log(`Refactoring function: ${message.functionName}`);
@@ -1216,7 +1153,6 @@ function highlightComplexFunctions(metrics) {
   
             complexityDecorations.push(decoration);
 
-            // Add refactor gutter icon for high-complexity functions
             if (metric.complexity > 10) {
                 const refactorRange = new vscode.Range(
                     startLine, 
@@ -1224,7 +1160,6 @@ function highlightComplexFunctions(metrics) {
                     startLine, 
                     0
                 );
-                 // Store the function range for later reference in refactoring
                 state.complexityRanges.set(metric.name, range);
 
                 refactorDecorations.push({
@@ -1235,7 +1170,7 @@ function highlightComplexFunctions(metrics) {
                             path.join(__dirname, "resources/images/refactor-icon.svg")
                         ),
                         gutterIconSize: "contain",
-                        cursor: "pointer", // Ensures pointer cursor on hover
+                        cursor: "pointer", 
                     },
                 });
                 
@@ -1248,9 +1183,7 @@ function highlightComplexFunctions(metrics) {
          }
         }
 
-     // Use the complexity decoration type
      state.activeEditor.setDecorations(state.complexityDecorationType, complexityDecorations);
-     // Use the refactor decoration type for gutter icons
      state.activeEditor.setDecorations(state.refactorDecorationType, refactorDecorations);
 }
 
@@ -1267,27 +1200,23 @@ async function handleFunctionRefactoring(functionName) {
             return;
         }
 
-        // Find the function's range
         const functionRange = state.complexityRanges.get(functionName);
         if (!functionRange) {
             vscode.window.showInformationMessage(`Function "${functionName}" not found.`);
             return;
         }
 
-        // Show a loading notification
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: `Analyzing and preparing to refactor function: ${functionName}`,
             cancellable: true
         }, async (progress, token) => {
-            // Check for cancellation
             if (token.isCancellationRequested) {
                 return;
             }
 
             progress.report({ increment: 10, message: "Extracting function code..." });
             
-            // Extract full function code
             const functionCode = extractFunctionCode(functionRange.start.line);
             if (!functionCode) {
                 vscode.window.showErrorMessage(`Could not extract code for function: ${functionName}`);
@@ -1296,21 +1225,17 @@ async function handleFunctionRefactoring(functionName) {
 
             progress.report({ increment: 30, message: "Requesting refactoring suggestions..." });
             
-            // Request refactoring
             const refactoredResult = await requestFunctionRefactoring(functionCode);
 
             progress.report({ increment: 40, message: "Preparing refactoring..." });
 
-            // Create a workspace edit to replace the function
             const edit = new vscode.WorkspaceEdit();
             edit.replace(editor.document.uri, functionRange, refactoredResult);
             
-            // Apply the edit
             await vscode.workspace.applyEdit(edit);
 
             progress.report({ increment: 20, message: "Refactoring complete!" });
 
-            // Show success message
             vscode.window.showInformationMessage(`Successfully refactored function: ${functionName}`);
         });
 
@@ -1326,30 +1251,14 @@ async function handleFunctionRefactoring(functionName) {
  * @param {string} functionCode 
  */
 async function requestFunctionRefactoring(functionCode) {
-    const apiUrl = "https://ai-api.amalitech.org/api/v1/public/chat";
-    const prompt = `As an Expert Software Developer, refactor the following JavaScript function:
-
-Refactoring Guidelines:
-1. Improve code readability
-2. Reduce cyclomatic complexity
-3. Follow best practices
-4. Maintain original functionality
-5. Add comments explaining key changes
-
-Function to Refactor:
-\`\`\`javascript
-${functionCode}
-\`\`\`
-
-Please return ONLY the refactored code. Do not include any additional text or explanations.`;
-
-    //const modelId = "a58c89f1-f8b6-45dc-9727-d22442c99bc3";
+    const apiUrl = "some url";
+    const prompt = `Some prompt`;
 
     try {
         const response = await fetch(apiUrl, {
             method: "POST",
             headers: {
-                "X-API-KEY": "MHzEqNKyVPYftQQgbbxv3y2sruZQ5Swk",
+                "X-API-KEY": "Some api Key",
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({ prompt, stream: false})
